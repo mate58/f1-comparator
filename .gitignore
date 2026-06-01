@@ -1,0 +1,17 @@
+# Entornos virtuales
+venv/
+env/
+
+# Variables de entorno (¡CRÍTICO para no publicar tus credenciales!)
+.env
+
+# Archivos de datos locales y telemetría
+data/
+f1_cache/
+*.parquet
+*.csv
+
+# Archivos de caché y compilación de Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

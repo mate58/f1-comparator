@@ -1,0 +1,10 @@
+# Dependencias necesarias para ejecutar la aplicación dentro de app/
+streamlit
+pandas
+numpy
+plotly
+scikit-learn
+joblib
+umap-learn
+supabase
+python-dotenv

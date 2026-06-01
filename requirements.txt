@@ -1,0 +1,15 @@
+# Extracción, manipulación y telemetría
+pandas
+requests
+fastf1
+
+# Base de datos y variables de entorno
+supabase
+python-dotenv
+
+# Interfaz gráfica (Dashboard)
+streamlit
+
+# Estadística y Machine Learning
+scikit-learn
+xgboost
