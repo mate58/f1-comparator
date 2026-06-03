@@ -2,61 +2,6 @@
 dimensionality.py
 =================
 Reducción de dimensionalidad con UMAP para el proyecto F1 Driver DNA.
-
-Por qué UMAP y no PCA ni t-SNE
---------------------------------
-La elección del algoritmo de reducción no es cosmética: define qué estructura
-del espacio de features sobrevive en la proyección 2D que usamos para
-clustering y visualización.
-
-  PCA (Análisis de Componentes Principales)
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  PCA busca las direcciones de máxima varianza asumiendo que las relaciones
-  entre variables son LINEALES. Proyecta los datos sobre ejes ortogonales
-  que maximizan la varianza explicada.
-
-  Problema para nuestro caso: un piloto no es "más o menos" en cada feature
-  de forma independiente. La interacción entre elo_delta_companero y
-  car_bonus_avg es no lineal: ganarle al compañero con un auto malo vale
-  mucho más que con el mejor auto de la grilla. PCA destruye esa estructura.
-
-  t-SNE (t-distributed Stochastic Neighbor Embedding)
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  t-SNE es excelente para visualización de clusters pero tiene tres problemas:
-  1. No preserva estructura global: las distancias ENTRE clusters no son
-     interpretables. Solo las distancias DENTRO de un cluster son confiables.
-  2. No permite transformar nuevos puntos (requiere reentrenamiento).
-  3. Es no determinístico y muy sensible a `perplexity`.
-
-  UMAP (Uniform Manifold Approximation and Projection)
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  UMAP modela los datos como una variedad topológica (manifold) y busca
-  una proyección de menor dimensión que preserve tanto la estructura LOCAL
-  (vecinos cercanos) como la GLOBAL (distancias entre grupos).
-
-  Ventajas concretas para este proyecto:
-  - Permite `transform()` sobre nuevos puntos → el piloto hipotético del
-    dashboard puede proyectarse en el espacio ya entrenado.
-  - Más rápido que t-SNE para datasets medianos (2000+ vectores).
-  - `n_neighbors` es interpretable: cuántas carreras/temporadas de
-    "contexto" considera al construir el manifold.
-  - Con `metric='cosine'` es coherente con la similitud que usamos en
-    similarity.py: el mismo concepto de "dirección del vector" guía
-    tanto la reducción como la comparación.
-
-Parámetros clave
-----------------
-  n_neighbors  : 15  → equilibrio entre estructura local y global.
-                       Valores bajos (5) → más clusters fragmentados.
-                       Valores altos (50) → estructura más suavizada.
-  min_dist     : 0.1 → qué tan "apretados" están los puntos dentro
-                       de un cluster. 0.0 = máxima compresión.
-  n_components : 2   → para visualización. El pipeline interno usa 3
-                       para clustering (más información preservada).
-  metric       : 'cosine' → coherente con similarity.py. Dos pilotos
-                       con perfiles proporcionales (mismo estilo, distinto
-                       ELO absoluto por el auto) quedan cerca.
-  random_state : 42  → reproducibilidad total del experimento.
 """
 
 import joblib
@@ -80,11 +25,12 @@ UMAP_2D_PARAMS = dict(
 UMAP_3D_PARAMS = dict(
     n_neighbors  = 15,
     min_dist     = 0.1,
-    n_components = 3,   # Para clustering: más info preservada
+    n_components = 3,   
     metric       = "cosine",
     random_state = 42,
 )
 
+# Actualizado a las 7 dimensiones reales (sin las variables de ruido)
 FEATURE_COLS = [
     "elo_pico_temporada",
     "elo_final_temporada",
@@ -92,10 +38,11 @@ FEATURE_COLS = [
     "elo_qualy_vs_race_delta",
     "elo_delta_companero",
     "win_rate_duelos_carrera",
-    "car_bonus_avg",
     "elo_trend",
-    "remontada_rate",
 ]
+
+# UMAP DEBE entrenarse sobre las columnas normalizadas
+COLS_NORM = [f"{c}_norm" for c in FEATURE_COLS]
 
 ARTIFACTS_DIR = Path(__file__).parent / "artifacts"
 ARTIFACTS_DIR.mkdir(exist_ok=True)
@@ -107,22 +54,11 @@ ARTIFACTS_DIR.mkdir(exist_ok=True)
 
 def entrenar_umap(df_features: pd.DataFrame) -> tuple:
     """
-    Entrena dos reducers UMAP:
-      - reducer_2d : para visualización en el scatter plot del dashboard
-      - reducer_3d : para clustering (más información preservada en 3 ejes)
-
-    Guarda ambos modelos en artifacts/ para uso posterior sin reentrenar.
-
-    Parámetros
-    ----------
-    df_features : DataFrame normalizado con columnas FEATURE_COLS
-
-    Retorna
-    -------
-    (X_2d, X_3d, reducer_2d, reducer_3d)
+    Entrena dos reducers UMAP usando las dimensiones NORMALIZADAS.
     """
-    X = df_features[FEATURE_COLS].fillna(0).values
-    print(f"Entrenando UMAP sobre {X.shape[0]} vectores de {X.shape[1]} dimensiones...")
+    # Usamos COLS_NORM en lugar de FEATURE_COLS
+    X = df_features[COLS_NORM].fillna(0).values
+    print(f"Entrenando UMAP sobre {X.shape[0]} vectores de {X.shape[1]} dimensiones (normalizadas)...")
 
     # 2D — visualización
     reducer_2d = umap.UMAP(**UMAP_2D_PARAMS)
@@ -146,10 +82,6 @@ def proyectar_nuevo_piloto(
     vector_normalizado: np.ndarray,
     reducer_path: str | None = None
 ) -> np.ndarray:
-    """
-    Proyecta un piloto nuevo en el espacio UMAP ya entrenado, sin reentrenar.
-    Esta capacidad es exclusiva de UMAP (vs. t-SNE, que no la soporta).
-    """
     if reducer_path is None:
         reducer_path = str(Path(__file__).parent / "artifacts" / "umap_2d.pkl")
     reducer = joblib.load(reducer_path)
@@ -166,12 +98,6 @@ def construir_df_proyectado(
     X_3d: np.ndarray,
     labels_cluster: np.ndarray | None = None
 ) -> pd.DataFrame:
-    """
-    Adjunta las coordenadas UMAP (2D y 3D) al DataFrame de features.
-    Opcionalmente agrega las etiquetas de cluster.
-
-    Retorna el DataFrame enriquecido listo para el dashboard.
-    """
     df = df_features.copy()
     df["umap_x"]  = X_2d[:, 0]
     df["umap_y"]  = X_2d[:, 1]
@@ -190,9 +116,24 @@ def construir_df_proyectado(
 # ──────────────────────────────────────────────
 
 if __name__ == "__main__":
-    df_features = pd.read_csv("driver_features.csv")
+    HERE = Path(__file__).parent
+    PARENT = HERE.parent
+    
+    csv_path = PARENT / "driver_features.csv"
+    
+    if not csv_path.exists():
+        raise FileNotFoundError(f"No se encontró el archivo en {csv_path}. Ejecuta build_features.py primero.")
+        
+    df_features = pd.read_csv(csv_path)
+    
+    # Validamos que estén las columnas normalizadas
+    if not all(col in df_features.columns for col in COLS_NORM):
+        raise ValueError("El CSV no tiene las columnas _norm. Vuelve a ejecutar build_features.py.")
+
     X_2d, X_3d, reducer_2d, reducer_3d = entrenar_umap(df_features)
 
     df_proyectado = construir_df_proyectado(df_features, X_2d, X_3d)
-    df_proyectado.to_csv("driver_features_umap.csv", index=False)
-    print(f"\n✓ driver_features_umap.csv guardado ({len(df_proyectado)} registros)")
+    
+    output_path = PARENT / "driver_features_umap.csv"
+    df_proyectado.to_csv(output_path, index=False)
+    print(f"\n✓ {output_path.name} guardado con éxito ({len(df_proyectado)} registros)")

@@ -7,33 +7,25 @@ y desglose por dimensión.
 """
 
 import sys
+import numpy as np
 from pathlib import Path
 
-# pages/ está en driver_dni/pages/
-# Los módulos (similarity.py, clustering.py, etc.) están en driver_dni/models/
-# Los CSVs y PKLs también están en driver_dni/ (build_features los deja ahí)
-_HERE    = Path(__file__).resolve().parent        # driver_dni/pages/
-_DNI     = _HERE.parent                           # driver_dni/
-_MODELS  = _DNI / "models"                        # driver_dni/models/
+_HERE    = Path(__file__).resolve().parent
+_DNI     = _HERE.parent
+_MODELS  = _DNI / "models"
 
-sys.path.insert(0, str(_MODELS))   # para: from similarity import ...
-sys.path.insert(0, str(_DNI))      # por si acaso
+sys.path.insert(0, str(_MODELS))
+sys.path.insert(0, str(_DNI))
 
-MODELS_DIR = _DNI   # CSVs y scaler.pkl viven en driver_dni/
-ARTIFACTS_DIR = _MODELS / "artifacts"   # PKLs viven en driver_dni/models/artifacts/
-
+MODELS_DIR = _DNI
+ARTIFACTS_DIR = _MODELS / "artifacts"
 
 import joblib
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from similarity import (
-    comparar_dos_pilotos,
-    graficar_radar,
-    FEATURE_COLS,
-    FEATURE_LABELS,
-)
+from similarity import FEATURE_COLS, FEATURE_LABELS
 from clustering import ARCHETYPE_COLORS
 
 st.set_page_config(page_title="Duelo de Pilotos · F1 DNA", layout="wide")
@@ -43,6 +35,7 @@ def cargar_datos():
     return pd.read_csv(MODELS_DIR / "driver_features_clustered.csv")
 
 df = cargar_datos()
+COLS_NORM = [f"{c}_norm" for c in FEATURE_COLS]
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("⚔️ Duelo de Pilotos")
@@ -71,13 +64,30 @@ st.divider()
 
 # ── Comparación ───────────────────────────────────────────────────────────────
 if st.button("⚔️ Comparar", type="primary", use_container_width=True):
-    try:
-        resultado = comparar_dos_pilotos(piloto_a, year_a, piloto_b, year_b, df)
-        sim_pct   = resultado["similitud_global_pct"]
-        delta     = resultado["delta_por_feature"]
-        radar     = resultado["radar_data"]
+    # Extraemos filas
+    fila_a = df[(df["piloto_id"].astype(str)==piloto_a) & (df["year"]==year_a)]
+    fila_b = df[(df["piloto_id"].astype(str)==piloto_b) & (df["year"]==year_b)]
+    
+    if fila_a.empty or fila_b.empty:
+        st.error("No hay datos para esta combinación.")
+    else:
+        fila_a = fila_a.iloc[0]
+        fila_b = fila_b.iloc[0]
 
-        # Score de similitud global
+        # 1. Similitud global (Coseno sobre _norm)
+        vec_a = fila_a[COLS_NORM].fillna(0).values.astype(float)
+        vec_b = fila_b[COLS_NORM].fillna(0).values.astype(float)
+        
+        # Distancia Coseno manual segura
+        norm_a = np.linalg.norm(vec_a)
+        norm_b = np.linalg.norm(vec_b)
+        if norm_a == 0 or norm_b == 0:
+            sim_pct = 0.0
+        else:
+            cos_sim = np.dot(vec_a, vec_b) / (norm_a * norm_b)
+            sim_pct = round(max(0.0, float(cos_sim) * 100), 1)
+
+        # UI Score
         color_sim = "#00C851" if sim_pct >= 75 else "#FF8700" if sim_pct >= 50 else "#E10600"
         st.markdown(f"""
         <div style="text-align:center; padding: 20px; background: {color_sim}18;
@@ -90,10 +100,8 @@ if st.button("⚔️ Comparar", type="primary", use_container_width=True):
         st.markdown("")
 
         # Arquetipos
-        fila_a = df[(df["piloto_id"].astype(str)==piloto_a) & (df["year"]==year_a)]
-        fila_b = df[(df["piloto_id"].astype(str)==piloto_b) & (df["year"]==year_b)]
-        arch_a = fila_a.iloc[0].get("archetype","—") if not fila_a.empty else "—"
-        arch_b = fila_b.iloc[0].get("archetype","—") if not fila_b.empty else "—"
+        arch_a = fila_a.get("archetype","—")
+        arch_b = fila_b.get("archetype","—")
         col1, col2 = st.columns(2)
         with col1:
             ca = ARCHETYPE_COLORS.get(arch_a, "#888")
@@ -114,30 +122,50 @@ if st.button("⚔️ Comparar", type="primary", use_container_width=True):
 
         st.divider()
 
-        # Radar superpuesto
+        # Radar y Deltas
         col_r, col_d = st.columns([1, 1])
+        
+        # Invertimos volatilidad para el radar ("Consistencia")
+        valores_a = []
+        valores_b = []
+        deltas = []
+        
+        for i, col in enumerate(FEATURE_COLS):
+            val_a = vec_a[i]
+            val_b = vec_b[i]
+            if col == "elo_volatilidad":
+                val_a = 1.0 - val_a
+                val_b = 1.0 - val_b
+                
+            valores_a.append(val_a)
+            valores_b.append(val_b)
+            deltas.append(val_a - val_b) # Delta visual (A - B)
+
+        labels = [FEATURE_LABELS.get(c, c) for c in FEATURE_COLS]
 
         with col_r:
             st.subheader("Radar superpuesto")
-            fig_radar = graficar_radar(radar)
-            st.plotly_chart(fig_radar, use_container_width=True)
+            fig_r = go.Figure()
+            fig_r.add_trace(go.Scatterpolar(
+                r=valores_a + [valores_a[0]], theta=labels + [labels[0]], fill="toself",
+                name=f"🔴 {piloto_a}", fillcolor="rgba(225,6,0,0.15)", line=dict(color="#E10600", width=2)
+            ))
+            fig_r.add_trace(go.Scatterpolar(
+                r=valores_b + [valores_b[0]], theta=labels + [labels[0]], fill="toself",
+                name=f"🔵 {piloto_b}", fillcolor="rgba(0,144,208,0.15)", line=dict(color="#0090D0", width=2)
+            ))
+            fig_r.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                showlegend=True, template="plotly_white", height=400,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_r, use_container_width=True)
 
         with col_d:
             st.subheader("Diferencia por dimensión")
             st.caption("Positivo → Piloto A supera a Piloto B en esa dimensión.")
-
-            rows = []
-            for feat, diff in delta.items():
-                label = FEATURE_LABELS.get(feat, feat)
-                ganador = f"🔴 {piloto_a}" if diff > 0.02 else (f"🔵 {piloto_b}" if diff < -0.02 else "Empate")
-                rows.append({
-                    "Dimensión" : label,
-                    "Delta"     : round(diff, 3),
-                    "Ventaja"   : ganador
-                })
-
-            df_delta = pd.DataFrame(rows)
-
+            
+            df_delta = pd.DataFrame({"Dimensión": labels, "Delta": deltas})
             fig_delta = go.Figure(go.Bar(
                 x=df_delta["Delta"],
                 y=df_delta["Dimensión"],
@@ -151,11 +179,10 @@ if st.button("⚔️ Comparar", type="primary", use_container_width=True):
             ))
             fig_delta.add_vline(x=0, line_dash="dot", line_color="gray")
             fig_delta.update_layout(
-                xaxis_title="Delta (A - B)",
+                xaxis_title="Delta normalizado (A - B)",
                 yaxis=dict(autorange="reversed"),
                 template="plotly_white",
-                height=380,
-                margin=dict(t=10)
+                height=380, margin=dict(t=10)
             )
             st.plotly_chart(fig_delta, use_container_width=True)
 
@@ -165,40 +192,29 @@ if st.button("⚔️ Comparar", type="primary", use_container_width=True):
 
         df_a_hist = df[df["piloto_id"].astype(str) == piloto_a]
         df_b_hist = df[df["piloto_id"].astype(str) == piloto_b]
-        years_comun = set(df_a_hist["year"]).intersection(set(df_b_hist["year"]))
+        years_comun = sorted(list(set(df_a_hist["year"]).intersection(set(df_b_hist["year"]))))
 
         if years_comun:
             sims_historicas = []
-            for yr in sorted(years_comun):
-                try:
-                    r = comparar_dos_pilotos(piloto_a, yr, piloto_b, yr, df)
-                    sims_historicas.append({"year": yr, "similitud_pct": r["similitud_global_pct"]})
-                except ValueError:
-                    pass
+            for yr in years_comun:
+                va = df_a_hist[df_a_hist["year"]==yr][COLS_NORM].fillna(0).values.astype(float)[0]
+                vb = df_b_hist[df_b_hist["year"]==yr][COLS_NORM].fillna(0).values.astype(float)[0]
+                
+                na, nb = np.linalg.norm(va), np.linalg.norm(vb)
+                if na > 0 and nb > 0:
+                    csim = np.dot(va, vb) / (na * nb)
+                    sims_historicas.append({"year": yr, "similitud_pct": round(max(0.0, csim*100), 1)})
 
-            if sims_historicas:
-                df_hist_sim = pd.DataFrame(sims_historicas)
-                fig_hist = go.Figure(go.Scatter(
-                    x=df_hist_sim["year"],
-                    y=df_hist_sim["similitud_pct"],
-                    mode="lines+markers",
-                    line=dict(color="#E10600", width=2),
-                    marker=dict(size=8),
-                    hovertemplate="<b>%{x}</b><br>Similitud: %{y:.1f}%<extra></extra>"
-                ))
-                fig_hist.update_layout(
-                    xaxis_title="Temporada",
-                    yaxis_title="Similitud (%)",
-                    yaxis=dict(range=[0, 100]),
-                    template="plotly_white",
-                    height=280
-                )
-                st.plotly_chart(fig_hist, use_container_width=True)
+            df_hist_sim = pd.DataFrame(sims_historicas)
+            fig_hist = go.Figure(go.Scatter(
+                x=df_hist_sim["year"], y=df_hist_sim["similitud_pct"], mode="lines+markers",
+                line=dict(color="#E10600", width=2), marker=dict(size=8),
+                hovertemplate="<b>%{x}</b><br>Similitud: %{y:.1f}%<extra></extra>"
+            ))
+            fig_hist.update_layout(
+                xaxis_title="Temporada", yaxis_title="Similitud (%)",
+                yaxis=dict(range=[0, 100]), template="plotly_white", height=280
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
         else:
             st.info("No coincidieron en las mismas temporadas para comparar evolución histórica.")
-
-    except ValueError as e:
-        st.error(str(e))
-
-else:
-    st.info("Seleccioná ambos pilotos y hacé clic en **Comparar** para ver el análisis completo.")
