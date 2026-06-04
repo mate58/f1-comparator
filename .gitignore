@@ -2,7 +2,7 @@
 venv/
 env/
 
-# Variables de entorno (¡CRÍTICO para no publicar tus credenciales!)
+# Variables de entorno
 .env
 
 # Archivos de datos locales y telemetría
