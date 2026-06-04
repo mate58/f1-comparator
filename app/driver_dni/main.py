@@ -2,10 +2,12 @@
 main.py — Entry point del dashboard F1 Driver DNA
 ==================================================
 Streamlit multi-página. Ejecutar con:
-  streamlit run app/main.py
+  streamlit run main.py
 """
 
+import pandas as pd
 import streamlit as st
+from pathlib import Path
 
 st.set_page_config(
     page_title="F1 Driver DNA",
@@ -14,85 +16,139 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CSS global ───────────────────────────────────────────────────────────────
+# ── CSS global y estilos mejorados ────────────────────────────────────────────
 st.markdown("""
 <style>
-  [data-testid="stSidebar"] { background-color: #1a1a2e; }
-  [data-testid="stSidebar"] * { color: #f0f0f0 !important; }
-  .metric-card {
-    background: #f8f9fa; border-radius: 12px;
-    padding: 16px 20px; margin: 8px 0;
-    border-left: 4px solid #E10600;
-  }
-  .similitud-badge {
-    display: inline-block; padding: 4px 12px;
-    border-radius: 20px; font-weight: 600;
-    background: #E10600; color: white; font-size: 0.9rem;
-  }
+    /* Estilos del Sidebar */
+    [data-testid="stSidebar"] { 
+        background-color: #15151e; 
+        border-right: 1px solid #2b2b36;
+    }
+    
+    /* Tarjetas de Navegación Home */
+    .nav-card {
+        background-color: #1e1e28;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 10px 0;
+        border-left: 5px solid #E10600;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        color: white;
+    }
+    .nav-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(225, 6, 0, 0.15);
+    }
+    .nav-card h3 { margin-top: 0; color: #ffffff; font-size: 1.4rem;}
+    .nav-card p { color: #a0a0b0; font-size: 1rem; line-height: 1.5; }
+    
+    /* Badges de Arquetipos */
+    .badge {
+        display: inline-block; padding: 6px 12px;
+        border-radius: 20px; font-weight: 600; font-size: 0.85rem;
+        margin-right: 8px; margin-bottom: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Funciones de Datos ────────────────────────────────────────────────────────
+@st.cache_data
+def obtener_metricas_dataset():
+    """Lee el CSV generado para extraer estadísticas reales del proyecto."""
+    csv_path = Path(__file__).resolve().parent / "models" / "driver_features_clustered.csv"
+    
+    # En caso de que el main.py esté al mismo nivel que models/
+    if not csv_path.exists():
+        csv_path = Path(__file__).resolve().parent / "driver_features_clustered.csv"
+        
+    if csv_path.exists():
+        df = pd.read_csv(csv_path)
+        return {
+            "pilotos": df["piloto_id"].nunique(),
+            "vectores": len(df),
+            "arquetipos": df["archetype"].nunique(),
+            "periodo": f"{df['year'].min()} – {df['year'].max()}",
+            "dimensiones": 7
+        }
+    return None
+
+stats = obtener_metricas_dataset()
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/200px-F1.svg.png", width=120)
-    st.markdown("## 🏎️ F1 Driver DNA")
-    st.markdown("Aprendizaje no supervisado aplicado a datos históricos de Fórmula 1 (2000–2024)")
+    # Logo mediante emoji escalado con CSS (No se rompe nunca)
+    st.markdown("<h1 style='text-align:center; font-size: 4rem; margin-bottom: 0; padding-bottom: 0;'>🏎️</h1>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; margin-top: 0; padding-top: 0;'>Driver DNA</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:#888;'>Análisis de perfiles con IA</p>", unsafe_allow_html=True)
+    
     st.divider()
-    st.markdown("### Navegación")
-    st.page_link("pages/1_adn_piloto.py",    label="🧬 ADN del Piloto",       icon="🧬")
-    st.page_link("pages/2_duelo.py",          label="⚔️  Duelo de Pilotos",    icon="⚔️")
-    st.page_link("pages/3_piloto_custom.py",  label="🎛️  Piloto Hipotético",   icon="🎛️")
-    st.divider()
-    st.caption("Metodología: UMAP + K-Means + Similitud Coseno")
-    st.caption("Datos: Ergast API · OpenF1 API")
+    
+    # NOTA: Eliminamos los st.page_link() manuales. 
+    # Streamlit inyectará aquí automáticamente la navegación leyendo tu carpeta "pages/".
+    
+    st.caption("⚙️ **Metodología:** UMAP + K-Means + KNN")
+    st.caption("📊 **Datos:** Basado en historial ELO")
 
 # ── Home ───────────────────────────────────────────────────────────────────────
-st.title("🏎️ F1 Driver DNA")
-st.subheader("¿A qué piloto histórico te parecés?")
+st.title("🏎️ Proyecto F1 Driver DNA")
+st.subheader("Decodificando el rendimiento de los pilotos con Machine Learning")
 
 st.markdown("""
-Este proyecto aplica **aprendizaje no supervisado** sobre datos históricos de Fórmula 1
-para construir un sistema de comparación y clasificación de pilotos.
-
-El sistema asigna a cada piloto (por temporada) un **vector de features** derivado de
-su sistema ELO propio, ajustado por calidad del auto y rendimiento vs. compañero de escudería.
+Este dashboard utiliza **aprendizaje no supervisado** para analizar la historia de la Fórmula 1. 
+En lugar de mirar simples estadísticas de victorias, el sistema evalúa la "huella digital" de rendimiento de cada piloto a través de 7 dimensiones clave basadas en su ELO histórico, consistencia y dominio sobre su compañero de equipo.
 """)
 
+st.divider()
+
+# ── Tarjetas de navegación ────────────────────────────────────────────────────
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    <div class="metric-card">
+    <div class="nav-card">
         <h3>🧬 ADN del Piloto</h3>
-        <p>Ingresá un piloto y temporada para ver su perfil multidimensional,
-        a qué arquetipo pertenece y cuáles son los 5 pilotos históricos más similares.</p>
+        <p>Buscá un piloto y temporada específica para ver su radar multidimensional, descubrir a qué arquetipo pertenece y encontrar sus "gemelos" históricos.</p>
     </div>
     """, unsafe_allow_html=True)
 
 with col2:
     st.markdown("""
-    <div class="metric-card">
+    <div class="nav-card">
         <h3>⚔️ Duelo de Pilotos</h3>
-        <p>Compará dos pilotos cara a cara. El sistema muestra similitud global,
-        diferencias por dimensión y en qué época fueron más parecidos.</p>
+        <p>Enfrentá a dos pilotos cara a cara. Analizá en qué métricas específicas se sacan ventaja y descubrí en qué año de la historia fueron más parecidos.</p>
     </div>
     """, unsafe_allow_html=True)
 
 with col3:
     st.markdown("""
-    <div class="metric-card">
+    <div class="nav-card">
         <h3>🎛️ Piloto Hipotético</h3>
-        <p>Definí un piloto ideal con sliders (consistencia, rendimiento vs. compañero,
-        calidad del auto, etc.) y descubrí a quién se parece en la historia de la F1.</p>
+        <p>Convertite en jefe de equipo: definí tu perfil de piloto ideal moviendo los sliders (7D) y dejá que el modelo encuentre quién se acerca más en la realidad.</p>
     </div>
     """, unsafe_allow_html=True)
 
+# ── Sección de Arquetipos y Métricas ──────────────────────────────────────────
 st.divider()
+col_arch, col_stats = st.columns([2, 1])
 
-# Métricas globales del dataset
-st.subheader("📊 Dataset")
-mc1, mc2, mc3, mc4 = st.columns(4)
-mc1.metric("Temporadas", "2000 – 2024")
-mc2.metric("Pilotos únicos", "~120")
-mc3.metric("Vectores piloto/temporada", "~800")
-mc4.metric("Features por vector", "9")
+with col_arch:
+    st.markdown("### 🧩 Los 6 Arquetipos Descubiertos")
+    st.markdown("Nuestro algoritmo K-Means agrupó naturalmente la historia de la F1 en estos perfiles:")
+    st.markdown("""
+    - <span class='badge' style='background-color:#E1060022; color:#E10600; border:1px solid #E10600'>Dominador absoluto</span> Alta tasa de victorias, altísimo ELO, supera a todos.
+    - <span class='badge' style='background-color:#2980b922; color:#2980b9; border:1px solid #2980b9'>Sobre-rendidor con mal auto</span> Destruye a su compañero pero su coche limita sus puntos totales.
+    - <span class='badge' style='background-color:#f39c1222; color:#f39c12; border:1px solid #f39c12'>Clasificador puro</span> Brilla los sábados, pero pierde ELO los domingos en carrera.
+    - <span class='badge' style='background-color:#27ae6022; color:#27ae60; border:1px solid #27ae60'>Consistente de midfield</span> Poca volatilidad, suma siempre lo que el auto le permite.
+    - <span class='badge' style='background-color:#8e44ad22; color:#8e44ad; border:1px solid #8e44ad'>Piloto de desarrollo</span> Tendencia al alza pronunciada durante la temporada.
+    - <span class='badge' style='background-color:#7f8c8d22; color:#7f8c8d; border:1px solid #7f8c8d'>Piloto irregular</span> Mucha volatilidad de ELO, alterna buenas carreras con desastres.
+    """, unsafe_allow_html=True)
+
+with col_stats:
+    st.markdown("### 📊 Estado de la Base de Datos")
+    if stats:
+        st.metric("Temporadas Analizadas", stats["periodo"])
+        st.metric("Vectores (Piloto/Año)", f"{stats['vectores']} registros")
+        st.metric("Pilotos Únicos", stats["pilotos"])
+        st.metric("Dimensiones por Vector", f"{stats['dimensiones']} (Normalizadas)")
+    else:
+        st.warning("⚠️ No se encontró el archivo de datos. Asegúrate de ejecutar los pipelines de modelos primero.")
