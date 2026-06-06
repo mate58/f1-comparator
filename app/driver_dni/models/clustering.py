@@ -17,13 +17,13 @@ import plotly.graph_objects as go
 ARTIFACTS_DIR = Path("artifacts")
 ARTIFACTS_DIR.mkdir(exist_ok=True)
 
+# 1. NOMBRES ALINEADOS CON MAIN.PY
 ARCHETYPE_NAMES = {
-    0: "Dominador absoluto",
-    1: "Sobre-rendidor con mal auto",
-    2: "Clasificador puro",
-    3: "Consistente de midfield",
-    4: "Piloto de desarrollo",
-    5: "Piloto irregular",
+    0: "El Muro Defensivo",
+    1: "El Dominador Absoluto",
+    2: "El Maestro a Una Vuelta",
+    3: "El Piloto Escudero",
+    4: "El Sobreviviente",
 }
 
 # ──────────────────────────────────────────────
@@ -57,19 +57,19 @@ def buscar_k_optimo(X: np.ndarray, k_min: int = 2, k_max: int = 10, random_state
 
     df_metricas = pd.DataFrame(resultados)
     k_optimo = int(df_metricas.loc[df_metricas["silhouette"].idxmax(), "k"])
-    print(f"\n✓ k óptimo: {k_optimo}")
+    print(f"\n✓ k óptimo matemático sugerido: {k_optimo}")
     return k_optimo, df_metricas
 
 
 def entrenar_kmeans(X: np.ndarray, k: int, random_state: int = 42) -> KMeans:
-    print(f"\nEntrenando K-Means con k={k}...")
+    print(f"\nEntrenando K-Means forzado con k={k} arquetipos...")
     km = KMeans(n_clusters=k, random_state=random_state, n_init=20).fit(X)
     joblib.dump(km, ARTIFACTS_DIR / "kmeans.pkl")
     return km
 
 
 def analizar_centroides(df_clustered: pd.DataFrame, scaler) -> pd.DataFrame:
-    # 1. Agrupamos usando las features normalizadas por cluster
+    # 1. Agrupamos usando las features normalizadas originales por cluster
     centroides_norm = df_clustered.groupby("cluster")[COLS_NORM].mean().values
     
     # 2. Desnormalizamos para que sea legible por humanos
@@ -86,21 +86,17 @@ def analizar_centroides(df_clustered: pd.DataFrame, scaler) -> pd.DataFrame:
 # COLORES Y VISUALIZACIÓN (PARA STREAMLIT)
 # ──────────────────────────────────────────────
 
+# 2. COLORES ALINEADOS CON EL CSS DE MAIN.PY
 ARCHETYPE_COLORS = {
-    "Dominador absoluto": "#E10600",        # Rojo F1
-    "Sobre-rendidor con mal auto": "#2980b9", # Azul
-    "Clasificador puro": "#f39c12",         # Naranja
-    "Consistente de midfield": "#27ae60",     # Verde
-    "Piloto de desarrollo": "#8e44ad",        # Morado
-    "Piloto irregular": "#7f8c8d",            # Gris
+    "El Dominador Absoluto": "#E10600",
+    "El Maestro a Una Vuelta": "#f39c12",
+    "El Muro Defensivo": "#27ae60",
+    "El Piloto Escudero": "#2980b9",
+    "El Sobreviviente": "#7f8c8d",
     "Desconocido": "#bdc3c7"
 }
 
 def graficar_scatter_umap(df: pd.DataFrame, highlight_driver: str = None) -> go.Figure:
-    """
-    Crea un Scatter Plot 2D de las coordenadas UMAP coloreado por arquetipo.
-    Si se pasa un highlight_driver, resalta sus temporadas con estrellas.
-    """
     fig = px.scatter(
         df, 
         x="umap_x", 
@@ -111,7 +107,6 @@ def graficar_scatter_umap(df: pd.DataFrame, highlight_driver: str = None) -> go.
         opacity=0.5
     )
     
-    # Resaltar al piloto seleccionado (estrella dorada)
     if highlight_driver:
         df_hl = df[df["piloto_id"].astype(str) == str(highlight_driver)]
         if not df_hl.empty:
@@ -146,14 +141,12 @@ def graficar_scatter_umap(df: pd.DataFrame, highlight_driver: str = None) -> go.
 # ──────────────────────────────────────────────
 
 def leer_csv_seguro(path: str) -> pd.DataFrame:
-    # Lectura genérica delegada al header del CSV
     return pd.read_csv(path)
 
 if __name__ == "__main__":
     HERE   = Path(__file__).parent
     PARENT = HERE.parent
     
-    # Leemos el archivo con los datos de UMAP ya generados
     base_path = PARENT / "driver_features_umap.csv"
     if not base_path.exists():
         base_path = PARENT / "driver_features.csv"
@@ -163,22 +156,26 @@ if __name__ == "__main__":
         
     df = leer_csv_seguro(str(base_path))
 
-    # Aseguramos que tenemos las columnas _norm
     if not all(col in df.columns for col in COLS_NORM):
         raise ValueError("Faltan las columnas normalizadas (_norm). Ejecuta build_features.py primero.")
 
-    print("Clustering sobre las 7 dimensiones reales (normalizadas)...")
-    X_cluster = df[COLS_NORM].values
+    # 3. FEATURE WEIGHTING: Aplicamos pesos para resaltar el estilo de manejo
+    print("Aplicando Feature Weighting a variables de estilo...")
+    df_cluster = df[COLS_NORM].copy()
+    df_cluster['elo_volatilidad_norm'] = df_cluster['elo_volatilidad_norm'] * 2.0
+    df_cluster['elo_qualy_vs_race_delta_norm'] = df_cluster['elo_qualy_vs_race_delta_norm'] * 2.5
+    df_cluster['elo_delta_companero_norm'] = df_cluster['elo_delta_companero_norm'] * 1.5
 
-    # K-Means
-    k_optimo, _ = buscar_k_optimo(X_cluster)
+    X_cluster = df_cluster.values
+
+    # 4. FORZAMOS K=5 (Ignoramos la sugerencia matemática para ajustarnos a la narrativa de negocio)
+    k_optimo = 5
     km = entrenar_kmeans(X_cluster, k_optimo)
 
-    # Asignar a nuestro DataFrame
+    # Asignamos al df original (no al ponderado) para no arruinar los datos reales
     df["cluster"] = km.predict(X_cluster)
     df["archetype"] = df["cluster"].map(lambda i: ARCHETYPE_NAMES.get(i, f"Cluster {i}"))
     
-    # Desnormalizar centroides para la consola
     scaler = joblib.load(PARENT / "scaler.pkl")
     df_centroides = analizar_centroides(df, scaler)
     
@@ -187,4 +184,4 @@ if __name__ == "__main__":
 
     output_path = PARENT / "driver_features_clustered.csv"
     df.to_csv(output_path, index=False)
-    print(f"\n✓ {output_path} guardado con éxito.")
+    print(f"\n✓ {output_path} guardado con éxito. Todo sincronizado con main.py.")
