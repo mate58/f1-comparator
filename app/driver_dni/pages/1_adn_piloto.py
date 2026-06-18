@@ -34,8 +34,18 @@ def hex_to_rgba(hex_color: str, alpha: float = 0.2) -> str:
 
 @st.cache_data
 def cargar_datos():
-    # Cargamos el CSV que tiene TANTO los valores reales como los _norm
-    return pd.read_csv(MODELS_DIR / "driver_features_clustered.csv")
+    # 🚨 ARREGLO 1: Leer el archivo FINAL para que las coordenadas UMAP sean idénticas al main.py
+    ruta_final = MODELS_DIR / "driver_features_final.csv"
+    if not ruta_final.exists():
+        ruta_final = MODELS_DIR / "driver_features_clustered.csv"
+        
+    df = pd.read_csv(ruta_final)
+    
+    # 🚨 ARREGLO 2: Estandarizar la columna para que tu código de colores y gráficos no se rompa
+    if "arquetipo" in df.columns and "archetype" not in df.columns:
+        df = df.rename(columns={"arquetipo": "archetype"})
+        
+    return df
 
 @st.cache_resource
 def cargar_modelos():
@@ -139,6 +149,7 @@ with col_similares:
 st.divider()
 st.subheader("📍 Posición en el espacio UMAP")
 st.caption("Cada punto = un piloto en una temporada. Colores = arquetipos. ★ = piloto seleccionado.")
+# Ahora esto leerá las coordenadas exactas de driver_features_final.csv
 fig_scatter = graficar_scatter_umap(df, highlight_driver=piloto_elegido)
 st.plotly_chart(fig_scatter, use_container_width=True)
 

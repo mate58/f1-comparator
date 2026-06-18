@@ -84,7 +84,8 @@ def preparar_df_carreras():
     df_carreras['car_bonus'] = (11 - df_carreras['const_pos'].clip(1, 10)) * 10
 
     # 6. Ordenar cronológicamente para que el ELO simule el paso del tiempo
-    df_carreras.sort_values(by=['year', 'race_id'], inplace=True)
+    df_carreras['round_num'] = df_carreras['race_id'].apply(lambda x: int(str(x).split('_')[1]) if '_' in str(x) else 0)
+    df_carreras.sort_values(by=['year', 'round_num'], inplace=True)
     
     return df_carreras
 
@@ -235,7 +236,7 @@ def procesar_elo():
     df_final.to_csv('driver_elo_para_supabase.csv', index=False)
     print(f"\n¡Archivo local generado! Total registros: {len(df_final)}")
 
-    # 🚨 FIX: Quitamos la columna 'id' que sobra, pero mantenemos todas las métricas iniciales y finales
+    
     if 'id' in df_final.columns:
         df_supabase = df_final.drop(columns=['id'])
     else:

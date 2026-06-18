@@ -25,14 +25,20 @@ MODELS_DIR = _DNI
 ARTIFACTS_DIR = _MODELS / "artifacts"
 
 from similarity import FEATURE_COLS, FEATURE_LABELS, graficar_barra_similares
-from dimensionality import proyectar_nuevo_piloto
 from clustering import graficar_scatter_umap
 
 st.set_page_config(page_title="Piloto Hipotético · F1 DNA", layout="wide")
 
 @st.cache_data
 def cargar_datos():
-    return pd.read_csv(MODELS_DIR / "driver_features_clustered.csv")
+    ruta = MODELS_DIR / "driver_features_final.csv"
+    if not ruta.exists():
+        ruta = MODELS_DIR / "driver_features_clustered.csv"
+        
+    df = pd.read_csv(ruta)
+    if "arquetipo" in df.columns and "archetype" not in df.columns:
+        df = df.rename(columns={"arquetipo": "archetype"})
+    return df
 
 @st.cache_resource
 def cargar_modelos():
@@ -43,17 +49,33 @@ df  = cargar_datos()
 knn = cargar_modelos()
 COLS_NORM = [f"{c}_norm" for c in FEATURE_COLS]
 
+# ── FIX: Inicialización de Memoria (Session State) ───────────────────────────
+if "sl_pico" not in st.session_state:
+    st.session_state.update({
+        "sl_pico": 0.5, "sl_final": 0.48, "sl_vol": 0.5,
+        "sl_qualy": 0.5, "sl_comp": 0.5, "sl_win": 0.5, "sl_trend": 0.5
+    })
+
+# Callback: Cuando apretamos un preset, guarda los valores en la memoria
+def aplicar_preset(vals):
+    st.session_state.sl_pico = vals["elo_pico"]
+    st.session_state.sl_final = vals["elo_final"]
+    st.session_state.sl_vol = vals["volatilidad"]
+    st.session_state.sl_qualy = vals["qualy_race"]
+    st.session_state.sl_comp = vals["companero"]
+    st.session_state.sl_win = vals["win_rate"]
+    st.session_state.sl_trend = vals["trend"]
+
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🎛️ Piloto Hipotético")
 st.markdown("""
-Definí el perfil de un piloto usando los sliders. El sistema proyectará ese perfil
-en el espacio UMAP y encontrará los pilotos históricos más parecidos.
+Definí el perfil de un piloto usando los sliders. El sistema encontrará los pilotos históricos 
+más parecidos y te mostrará en qué sector del mapa UMAP caería tu selección.
 """)
 
 # ── Presets ───────────────────────────────────────────────────────────────────
 st.markdown("#### Presets rápidos")
 preset_cols = st.columns(5)
-# Presets adaptados a 7 dimensiones
 presets = {
     "Dominador"     : {"elo_pico":0.95, "elo_final":0.93, "volatilidad":0.1, "qualy_race":0.6, "companero":0.85, "win_rate":0.90, "trend":0.5},
     "Sobre-rendidor": {"elo_pico":0.60, "elo_final":0.58, "volatilidad":0.3, "qualy_race":0.7, "companero":0.75, "win_rate":0.78, "trend":0.55},
@@ -62,40 +84,36 @@ presets = {
     "Rookie"        : {"elo_pico":0.35, "elo_final":0.40, "volatilidad":0.7, "qualy_race":0.4, "companero":0.30, "win_rate":0.35, "trend":0.90},
 }
 
-selected_preset = None
+# Modificamos los botones para usar el "on_click" callback
 for col, (nombre, vals) in zip(preset_cols, presets.items()):
     with col:
-        if st.button(nombre, use_container_width=True):
-            selected_preset = vals
+        st.button(nombre, on_click=aplicar_preset, args=(vals,), use_container_width=True)
 
 # ── Sliders ───────────────────────────────────────────────────────────────────
 st.divider()
 st.markdown("#### Configurá el perfil (7 Dimensiones)")
 st.caption("Todos los valores están normalizados en [0, 1]. El modelo los mapea al espacio de features.")
 
-def get_default(field: str, default: float) -> float:
-    return selected_preset.get(field, default) if selected_preset else default
-
 c1, c2, c3 = st.columns(3)
 
+# Ahora los sliders usan las variables "key", lo que los conecta directamente a la memoria
 with c1:
-    elo_pico    = st.slider("ELO pico temporada", 0.0, 1.0, get_default("elo_pico", 0.5), 0.01)
-    elo_final   = st.slider("ELO final temporada", 0.0, 1.0, get_default("elo_final", 0.48), 0.01)
-    volatilidad = st.slider("Consistencia (inverso volatilidad)", 0.0, 1.0, get_default("volatilidad", 0.5), 0.01)
+    elo_pico    = st.slider("ELO pico temporada", 0.0, 1.0, key="sl_pico", step=0.01)
+    elo_final   = st.slider("ELO final temporada", 0.0, 1.0, key="sl_final", step=0.01)
+    volatilidad = st.slider("Consistencia (inverso volatilidad)", 0.0, 1.0, key="sl_vol", step=0.01)
 
 with c2:
-    qualy_race  = st.slider("Mejora qualy → carrera", 0.0, 1.0, get_default("qualy_race", 0.5), 0.01)
-    companero   = st.slider("Delta vs. compañero", 0.0, 1.0, get_default("companero", 0.5), 0.01)
+    qualy_race  = st.slider("Mejora qualy → carrera", 0.0, 1.0, key="sl_qualy", step=0.01)
+    companero   = st.slider("Delta vs. compañero", 0.0, 1.0, key="sl_comp", step=0.01)
 
 with c3:
-    win_rate    = st.slider("Win rate duelos", 0.0, 1.0, get_default("win_rate", 0.5), 0.01)
-    trend       = st.slider("Progresión en la temporada", 0.0, 1.0, get_default("trend", 0.5), 0.01)
+    win_rate    = st.slider("Win rate duelos", 0.0, 1.0, key="sl_win", step=0.01)
+    trend       = st.slider("Progresión en la temporada", 0.0, 1.0, key="sl_trend", step=0.01)
 
-# ── Construir vector 7D ───────────────────────────────────────────────────────
 vector_custom = {
     "elo_pico_temporada": elo_pico,
     "elo_final_temporada": elo_final,
-    "elo_volatilidad": 1.0 - volatilidad,  # Invertido para que el KNN entienda
+    "elo_volatilidad": 1.0 - volatilidad,
     "elo_qualy_vs_race_delta": qualy_race,
     "elo_delta_companero": companero,
     "win_rate_duelos_carrera": win_rate,
@@ -107,7 +125,6 @@ st.divider()
 # ── Buscar matches ────────────────────────────────────────────────────────────
 if st.button("🔍 Encontrar pilotos similares", type="primary", use_container_width=True):
 
-    # 1. Ejecutamos el KNN manualmente
     vector_array = np.array([[vector_custom[col] for col in FEATURE_COLS]])
     distancias, indices = knn.kneighbors(vector_array, n_neighbors=5)
     
@@ -132,7 +149,7 @@ if st.button("🔍 Encontrar pilotos similares", type="primary", use_container_w
 
         for _, row in df_matches.iterrows():
             st.markdown(f"""
-            <div style="padding:8px 14px; margin:4px 0; border-radius:8px; background:#f0f2f6;
+            <div style="padding:8px 14px; margin:4px 0; border-radius:8px; background:#2980b9;
                         border-left:3px solid #E10600;">
                 <b>{row['piloto_id']}</b> ({row['year']}) ·
                 <span style="color:#E10600; font-weight:600">{row['similitud_pct']}%</span> ·
@@ -143,7 +160,6 @@ if st.button("🔍 Encontrar pilotos similares", type="primary", use_container_w
         st.subheader("🧬 Tu perfil vs. mejor match")
         mejor = df_matches.iloc[0]
         
-        # Obtenemos vector de match desde columnas normalizadas
         fila_match = df[(df["piloto_id"].astype(str) == str(mejor["piloto_id"])) & (df["year"] == int(mejor["year"]))].iloc[0]
         
         vec_match_radar = []
@@ -180,20 +196,9 @@ if st.button("🔍 Encontrar pilotos similares", type="primary", use_container_w
         )
         st.plotly_chart(fig_r, use_container_width=True)
 
-    # ── Scatter UMAP con piloto hipotético proyectado ──────────────────────
     st.divider()
-    st.subheader("📍 Tu piloto en el espacio UMAP")
-    st.caption("La estrella ★ muestra dónde caería tu perfil en el mapa de arquetipos históricos.")
+    st.subheader("📍 Posición en el espacio UMAP")
+    st.caption(f"La estrella ★ muestra dónde cae tu Mejor Match ({mejor['piloto_id']}) para que veas tu Arquetipo en el mapa.")
 
-    try:
-        coords_2d = proyectar_nuevo_piloto(vector_array, str(ARTIFACTS_DIR / "umap_2d.pkl"))
-
-        fig_sc = graficar_scatter_umap(df)
-        fig_sc.add_trace(go.Scatter(
-            x=[coords_2d[0, 0]], y=[coords_2d[0, 1]], mode="markers+text",
-            name="★ Tu piloto", marker=dict(size=18, color="#FFD700", symbol="star", line=dict(width=2, color="#E10600")),
-            text=["Tu perfil"], textposition="top center"
-        ))
-        st.plotly_chart(fig_sc, use_container_width=True)
-    except Exception as e:
-        st.info(f"No se pudo proyectar el piloto en el mapa UMAP. Detalle: {e}")
+    fig_sc = graficar_scatter_umap(df, highlight_driver=mejor['piloto_id'])
+    st.plotly_chart(fig_sc, use_container_width=True)

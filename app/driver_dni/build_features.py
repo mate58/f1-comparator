@@ -108,7 +108,7 @@ def build_feature_vector(df_elo: pd.DataFrame, df_results: pd.DataFrame) -> pd.D
     res_clean = df_results[cols_necesarias].copy()
     res_clean = res_clean.rename(columns={"driver_id": "piloto_id"})
     
-    # 🚨 FIX CRÍTICO: Limpieza indestructible de IDs para que el merge cruce perfectamente
+    # Limpieza indestructible de IDs para que el merge cruce perfectamente
     for df_temp in [df_elo, res_clean]:
         if "race_id" in df_temp.columns:
             # Convierte 10.0 o "10.0" a "10"
@@ -124,13 +124,13 @@ def build_feature_vector(df_elo: pd.DataFrame, df_results: pd.DataFrame) -> pd.D
 
     records = []
     
-    # 🚨 FIX CRÍTICO: Aseguramos numéricos reales para que dropna() y ordenamientos no fallen
+    # 🚨 FIX CRÍTICO CORREGIDO: Aseguramos numéricos reales y extraemos la ronda
     df["elo_race_final"] = pd.to_numeric(df["elo_race_final"], errors="coerce")
-    df["race_id_num"] = pd.to_numeric(df["race_id"], errors="coerce").fillna(0)
+    df["race_round"] = df["race_id"].apply(lambda x: int(str(x).split('_')[1]) if '_' in str(x) else 0)
 
     for (piloto_id, year), g in df.groupby(["piloto_id", "year"]):
-        # Ordenamos numéricamente (1, 2, 3... 10) y no alfabéticamente (1, 10, 2)
-        g = g.sort_values("race_id_num")
+        # Ahora sí ordenamos numéricamente y de forma cronológica estricta
+        g = g.sort_values("race_round")
         elo_finals = g["elo_race_final"].dropna()
         
         if len(elo_finals) < 2:

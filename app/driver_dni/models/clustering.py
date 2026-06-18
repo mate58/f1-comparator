@@ -1,7 +1,8 @@
 """
 clustering.py
 =============
-Pipeline de clustering para el proyecto F1 Driver DNA.
+Pipeline de clustering dinámico para F1 Driver DNA 
+(Incluye herramientas de graficación para el Frontend).
 """
 
 import os
@@ -10,24 +11,14 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
 import plotly.express as px
 import plotly.graph_objects as go
 
 ARTIFACTS_DIR = Path("artifacts")
 ARTIFACTS_DIR.mkdir(exist_ok=True)
 
-# 1. NOMBRES ALINEADOS CON MAIN.PY
-ARCHETYPE_NAMES = {
-    0: "El Muro Defensivo",
-    1: "El Dominador Absoluto",
-    2: "El Maestro a Una Vuelta",
-    3: "El Piloto Escudero",
-    4: "El Sobreviviente",
-}
-
 # ──────────────────────────────────────────────
-# CONFIGURACIÓN DE DIMENSIONES (7D)
+# CONFIGURACIÓN DE DIMENSIONES Y COLORES
 # ──────────────────────────────────────────────
 
 FEATURE_COLS = [
@@ -41,52 +32,6 @@ FEATURE_COLS = [
 ]
 COLS_NORM = [f"{c}_norm" for c in FEATURE_COLS]
 
-
-# ──────────────────────────────────────────────
-# BÚSQUEDA DEL K ÓPTIMO Y ENTRENAMIENTO
-# ──────────────────────────────────────────────
-
-def buscar_k_optimo(X: np.ndarray, k_min: int = 2, k_max: int = 10, random_state: int = 42) -> tuple[int, pd.DataFrame]:
-    print(f"Buscando k óptimo en rango [{k_min}, {k_max}]...")
-    resultados = []
-    for k in range(k_min, k_max + 1):
-        km = KMeans(n_clusters=k, random_state=random_state, n_init=10).fit(X)
-        sil = silhouette_score(X, km.labels_)
-        resultados.append({"k": k, "silhouette": sil, "inercia": km.inertia_})
-        print(f"  k={k} | Silhouette={sil:.4f} | Inercia={km.inertia_:.1f}")
-
-    df_metricas = pd.DataFrame(resultados)
-    k_optimo = int(df_metricas.loc[df_metricas["silhouette"].idxmax(), "k"])
-    print(f"\n✓ k óptimo matemático sugerido: {k_optimo}")
-    return k_optimo, df_metricas
-
-
-def entrenar_kmeans(X: np.ndarray, k: int, random_state: int = 42) -> KMeans:
-    print(f"\nEntrenando K-Means forzado con k={k} arquetipos...")
-    km = KMeans(n_clusters=k, random_state=random_state, n_init=20).fit(X)
-    joblib.dump(km, ARTIFACTS_DIR / "kmeans.pkl")
-    return km
-
-
-def analizar_centroides(df_clustered: pd.DataFrame, scaler) -> pd.DataFrame:
-    # 1. Agrupamos usando las features normalizadas originales por cluster
-    centroides_norm = df_clustered.groupby("cluster")[COLS_NORM].mean().values
-    
-    # 2. Desnormalizamos para que sea legible por humanos
-    centroides_real = scaler.inverse_transform(centroides_norm)
-    df_centroides = pd.DataFrame(centroides_real, columns=FEATURE_COLS)
-    
-    df_centroides.index = df_clustered.groupby("cluster").groups.keys()
-    df_centroides.index.name = "cluster"
-    df_centroides["archetype"] = df_centroides.index.map(lambda i: ARCHETYPE_NAMES.get(i, f"Cluster {i}"))
-    return df_centroides
-
-
-# ──────────────────────────────────────────────
-# COLORES Y VISUALIZACIÓN (PARA STREAMLIT)
-# ──────────────────────────────────────────────
-
-# 2. COLORES ALINEADOS CON EL CSS DE MAIN.PY
 ARCHETYPE_COLORS = {
     "El Dominador Absoluto": "#E10600",
     "El Maestro a Una Vuelta": "#f39c12",
@@ -96,12 +41,27 @@ ARCHETYPE_COLORS = {
     "Desconocido": "#bdc3c7"
 }
 
+# ──────────────────────────────────────────────
+# VISUALIZACIÓN (Utilizada por Streamlit Frontend)
+# ──────────────────────────────────────────────
+
 def graficar_scatter_umap(df: pd.DataFrame, highlight_driver: str = None) -> go.Figure:
+    """Genera el gráfico base de UMAP que consumen las páginas del dashboard."""
+    # Intentamos asegurar que la columna exista con el nombre correcto
+    col_arq = "archetype" if "archetype" in df.columns else "arquetipo"
+    
+    # Validamos que las coordenadas UMAP existan antes de graficar
+    if 'umap_x' not in df.columns or 'umap_y' not in df.columns:
+        # Gráfico vacío de advertencia si aún no se corrió dimensionality.py
+        fig = go.Figure()
+        fig.add_annotation(text="Faltan coordenadas UMAP", showarrow=False, font=dict(size=20))
+        return fig
+
     fig = px.scatter(
         df, 
         x="umap_x", 
         y="umap_y", 
-        color="archetype",
+        color=col_arq,
         hover_data=["piloto_id", "year"],
         color_discrete_map=ARCHETYPE_COLORS,
         opacity=0.5
@@ -135,31 +95,49 @@ def graficar_scatter_umap(df: pd.DataFrame, highlight_driver: str = None) -> go.
     
     return fig
 
+# ──────────────────────────────────────────────
+# LÓGICA DINÁMICA DE ARQUETIPOS
+# ──────────────────────────────────────────────
+
+def asignar_nombres_dinamicos(df_centroides: pd.DataFrame) -> dict:
+    mapping = {}
+    disponibles = list(df_centroides.index)
+
+    c_dom = df_centroides.loc[disponibles, 'elo_pico_temporada'].idxmax()
+    mapping[c_dom] = "El Dominador Absoluto"
+    disponibles.remove(c_dom)
+
+    c_sob = df_centroides.loc[disponibles, 'elo_pico_temporada'].idxmin()
+    mapping[c_sob] = "El Sobreviviente"
+    disponibles.remove(c_sob)
+
+    c_esc = df_centroides.loc[disponibles, 'elo_delta_companero'].idxmin()
+    mapping[c_esc] = "El Piloto Escudero"
+    disponibles.remove(c_esc)
+
+    c_maestro = df_centroides.loc[disponibles, 'elo_qualy_vs_race_delta'].idxmax()
+    mapping[c_maestro] = "El Maestro a Una Vuelta"
+    disponibles.remove(c_maestro)
+
+    c_muro = disponibles[0]
+    mapping[c_muro] = "El Muro Defensivo"
+
+    return mapping
 
 # ──────────────────────────────────────────────
 # ENTRY POINT
 # ──────────────────────────────────────────────
 
-def leer_csv_seguro(path: str) -> pd.DataFrame:
-    return pd.read_csv(path)
-
 if __name__ == "__main__":
     HERE   = Path(__file__).parent
     PARENT = HERE.parent
     
-    base_path = PARENT / "driver_features_umap.csv"
+    base_path = PARENT / "driver_features.csv"
     if not base_path.exists():
-        base_path = PARENT / "driver_features.csv"
+        raise FileNotFoundError(f"No se encontró {base_path}")
         
-    if not base_path.exists():
-        raise FileNotFoundError(f"No se encontró el archivo de datos en {base_path}")
-        
-    df = leer_csv_seguro(str(base_path))
+    df = pd.read_csv(str(base_path))
 
-    if not all(col in df.columns for col in COLS_NORM):
-        raise ValueError("Faltan las columnas normalizadas (_norm). Ejecuta build_features.py primero.")
-
-    # 3. FEATURE WEIGHTING: Aplicamos pesos para resaltar el estilo de manejo
     print("Aplicando Feature Weighting a variables de estilo...")
     df_cluster = df[COLS_NORM].copy()
     df_cluster['elo_volatilidad_norm'] = df_cluster['elo_volatilidad_norm'] * 2.0
@@ -168,20 +146,27 @@ if __name__ == "__main__":
 
     X_cluster = df_cluster.values
 
-    # 4. FORZAMOS K=5 (Ignoramos la sugerencia matemática para ajustarnos a la narrativa de negocio)
-    k_optimo = 5
-    km = entrenar_kmeans(X_cluster, k_optimo)
+    print("\nEntrenando K-Means forzado con k=5 arquetipos...")
+    km = KMeans(n_clusters=5, random_state=42, n_init=20).fit(X_cluster)
+    joblib.dump(km, ARTIFACTS_DIR / "kmeans.pkl")
 
-    # Asignamos al df original (no al ponderado) para no arruinar los datos reales
     df["cluster"] = km.predict(X_cluster)
-    df["archetype"] = df["cluster"].map(lambda i: ARCHETYPE_NAMES.get(i, f"Cluster {i}"))
     
     scaler = joblib.load(PARENT / "scaler.pkl")
-    df_centroides = analizar_centroides(df, scaler)
+    centroides_norm = df.groupby("cluster")[COLS_NORM].mean().values
+    df_centroides = pd.DataFrame(scaler.inverse_transform(centroides_norm), columns=FEATURE_COLS)
+    df_centroides.index = df.groupby("cluster").groups.keys()
     
-    print("\n=== CENTROIDES (valores reales desnormalizados) ===")
-    print(df_centroides.round(2).to_string())
+    mapeo_dinamico = asignar_nombres_dinamicos(df_centroides)
+    
+   
+    df["archetype"] = df["cluster"].map(mapeo_dinamico)
+    df["arquetipo"] = df["archetype"]
+    
+    print("\n=== MAPEO DINÁMICO COMPLETADO ===")
+    for k, v in mapeo_dinamico.items():
+        print(f"Cluster {k} -> {v}")
 
     output_path = PARENT / "driver_features_clustered.csv"
     df.to_csv(output_path, index=False)
-    print(f"\n✓ {output_path} guardado con éxito. Todo sincronizado con main.py.")
+    print(f"\n✓ {output_path} guardado con éxito.")
